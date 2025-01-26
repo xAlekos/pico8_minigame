@@ -7,6 +7,13 @@ players = {}
 
 game_info = {
 
+game_over = false,
+
+win_state ={
+active = false,
+frames_since_active = 0
+
+},
 
 player_num = 4,
 player_lives = {
@@ -117,6 +124,10 @@ function check_modifiers()
 			play_animation(player.x,player.y,8,false,false,explosion_animation)
 			add(to_remove,{table = players, element = player})
 		end
+		--game over
+		if(#players == 1) then
+			game_info.win_state.active = true
+		end
 	end
 end
 
@@ -147,6 +158,11 @@ function check_active_effects()
 				player.hitbox.active = true
 			end
 		end
+		
+		--gameover
+		if(game_info.win_state.active) then
+			game_info.win_state.frames_since_active = (game_info.win_state.frames_since_active + 1)
+		end
 	end
 
 
@@ -160,20 +176,22 @@ end
 
 
 function _update()
-	frame_counter = (frame_counter + 1)%30
 	
-	input()
-	check_modifiers()
-	check_active_effects()
-	collision_logic()
-	remove_trash()
-
+	if(not game_info.gameover) then
+		frame_counter = (frame_counter + 1)%30
+		
+		input()
+		check_modifiers()
+		check_active_effects()
+		collision_logic()
+		remove_trash()
+	end
 end
  
 function _draw()
   cls(13)
 
-		if(#players == 1) then
+		if(game_info.win_state.active and game_info.win_state.frames_since_active > 30) then
 			
 			print("game over", 64,64)
 			print("winner player " .. tostr(players[1].id), 64,74)		
@@ -270,6 +288,7 @@ end
 
 function draw_effects()
 	
+	clip(16,15,96,96)
 	for _,player in pairs(players) do
 		for _,v in pairs(player.circles.active) do 
 				circ(player.x - 1 + 8,player.y + 8, v.cr,players_colors[player.id])
@@ -277,7 +296,7 @@ function draw_effects()
 		end
 
 	end
-	
+	clip()
 end
 
 function draw_lives()
