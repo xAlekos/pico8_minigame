@@ -417,6 +417,12 @@ function draw_ball()
 	pal()
 
 end
+
+function draw_timer()
+	
+	print(timer,64,64)
+
+end
 -->8
 function create_hitbox(player)
 	

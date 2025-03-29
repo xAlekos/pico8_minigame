@@ -1,0 +1,783 @@
+pico-8 cartridge // http://www.pico-8.com
+version 42
+__lua__
+frame_counter = 0
+players_colors = {8,11}
+players = {}
+
+game_info = {
+	start = false,
+	game_over = false,
+	win_state ={
+	active = false,
+	frames_since_active = 0
+	},
+	player_num = 2,
+	timer = 25,
+	player_lives = {
+	3,3},
+	player_pos = {}
+}
+
+trees = {}
+
+function init_trees(t,b) 
+
+	for i = 1,t do  
+	
+		tree = {}
+		tree.cx = players[i].x
+		tree.cy = players[i].y + 16
+		tree.branches = {}
+		
+		for j = 1,b do 
+			add(tree.branches,create_branch(j))
+		end
+		
+		add(trees,tree)
+	end
+end
+
+function create_branch(id)
+	
+	p = flr(rnd(2))
+	branch = {pos = p, num = id}
+	
+	return branch 
+
+end
+
+function create_player(px,py,pid)
+
+	player = {
+		left_btn = 0,
+		right_btn = 1,
+		x = px,
+		y = py,
+		rely_acc = 0, 		
+		rely = 0,
+		points = 0,
+		id = pid,
+		lives = 3,
+		spr_n = 0,
+		branch_n = 0,
+		jumping = {
+			pos = 0,
+			frames_active = 0,
+			activated = false,
+			active = false,
+			cooldown = 0,
+		},
+		camera_info ={
+		xoff = 0,
+		yoff = 0,
+		page = 1,
+		offsetting = false,
+		frame_offsetting = 0,
+	}
+	}
+	player.left_btn = player.id == 1 and 0 or 2
+	player.right_btn = player.id == 1 and 1 or 3
+	return player
+end
+
+function init_players()
+
+	add(game_info.player_pos,{x=40 - 8,y=94})
+	add(game_info.player_pos,{x=88 - 8,y=94})
+
+
+	add(players,create_player(game_info.player_pos[1].x ,game_info.player_pos[1].y,1))
+	add(players,create_player(game_info.player_pos[2].x, game_info.player_pos[2].y,2))
+
+end
+
+function input()
+	
+	for _ ,player in pairs(players) do 
+		
+			if(not player.jumping.active) then 
+				if(btnp(player.left_btn) and player.jumping.cooldown == 0) then
+					player.jumping.activated = true
+					player.jumping.pos = 0
+				end
+				if(btnp(player.right_btn) and player.jumping.cooldown == 0) then
+					player.jumping.activated = true
+					player.jumping.pos = 1
+				end
+			end
+	end
+end
+
+function check_modifiers()
+	
+	for _, player in pairs(players) do
+	
+		--jumping
+		if(player.jumping.activated) then
+			player.jumping.active = true
+			player.jumping.activated = false
+			jump(player)
+		end
+		--game over
+		if(game_info.timer == 0) then
+			game_info.win_state.active = true
+		end
+	end
+end
+
+function check_active_effects()
+	for _, player in pairs(players) do
+		--jumping
+		if(player.jumping.active) then
+			player.jumping.frames_active += 1
+			if(player.jumping.frames_active > 8) then
+				end_jump(player)
+			end
+		end	
+		if(player.jumping.cooldown > 0) then
+			player.jumping.cooldown -= 1
+		end
+		
+		--gameover
+		if(game_info.win_state.active) then
+			game_info.win_state.frames_since_active = (game_info.win_state.frames_since_active + 1)
+		end
+	end
+
+
+end
+
+function _init()
+	
+	init_players()
+	init_trees(2,120)
+end
+
+
+function _update()
+	
+	if(not game_info.gameover) then
+		frame_counter = (frame_counter + 1)%30
+		
+		input()
+		check_modifiers()
+		check_active_effects()
+		update_offset()
+		update_timer()
+		remove_trash()
+	end
+end
+ 
+function _draw()
+  cls(13)
+
+		if(game_info.win_state.active and game_info.win_state.frames_since_active > 36) then
+			winner = players[1].points > players[2].points and 1 or 2
+			print("game over", 64,64)
+			print("winner player " .. tostr(players[winner].id), 64,74)		
+			return
+		end
+	
+	
+		draw_points()
+		draw_background()
+		clip(16,15,96,96)
+		draw_split()
+		camera()
+		clip()
+		draw_animations()
+		draw_timer()
+	--	print(players[1].y)
+		--print(players[1].rely)
+		--print(players[1].camera_info.page)
+	--	print(players[1].camera_info.offsetting)
+		--print(players[1].camera_info.frame_offsetting)
+		--(players[1].branch_n)
+end
+
+
+
+-->8
+function jump(player)
+
+	next_branch = trees[player.id].branches[player.branch_n +1]
+	if(next_branch == nil) then
+		return
+	end
+	
+	actual_branch = trees[player.id].branches[player.branch_n]
+	if(player.jumping.pos == next_branch .pos) then
+		nextx = next_branch.pos == 0 and trees[player.id].cx - 8 or trees[player.id].cx + 8
+		nexty = trees[player.id].cy - 14 - (16 * next_branch.num) 
+		player.x = nextx
+		player.rely += player.y - nexty
+		player.y = nexty		
+		player.branch_n+=1
+		player.points+=1
+	elseif(actual_branch != nil and player.jumping.pos != actual_branch.pos) then
+		fall(player)
+	end
+end
+
+function fall(player)
+	
+	fallen = false
+	
+	while(not fallen) do
+	
+		prev_branch = trees[player.id].branches[player.branch_n - 1]
+		
+		if (prev_branch == nil) then
+			nextx = trees[player.id].cx
+			nexty = trees[player.id].cy - 16			
+			player.x = nextx
+			player.rely += player.y - nexty
+			player.y = nexty
+			fallen = true 		
+		elseif(player.jumping.pos == prev_branch .pos) then
+			nextx = prev_branch.pos == 0 and trees[player.id].cx - 8 or trees[player.id].cx + 8
+			nexty = trees[player.id].cy - 14 - (16 * prev_branch.num) 
+			player.x = nextx
+			player.rely += player.y - nexty
+			player.y = nexty
+			fallen = true 	
+		end
+		player.branch_n-=1
+	end
+end
+
+
+function end_jump(player)
+		player.jumping.active = false
+		player.jumping.cooldown = 1
+		player.jumping.frames_active = 0
+		
+end
+
+
+function update_offset()
+
+	for _, player in pairs(players) do
+		if(player.rely>=78 or player.rely< 0) then
+				player.camera_info.offsetting = true
+		end
+		
+		if(player.camera_info.offsetting == true) then
+			if(abs(player.rely) > 0) then	
+				diff = player.rely > 0 and 1 or -1
+				player.camera_info.yoff -= diff
+				player.rely -= diff
+			else	
+				player.camera_info.offsetting = false
+			end
+		end
+	end
+end
+
+
+function update_timer()
+
+
+	if(game_info.timer > 0 and frame_counter%30 == 0) then
+	game_info.timer-=1
+	end
+
+end
+-->8
+function draw_plaltforms()
+
+	for i = 1 ,game_info.player_num do
+			palt(0,false)
+			palt(1,true)
+			spr(2,game_info.player_pos[i].x+2,game_info.player_pos[i].y+13,1,1,false,false)
+			spr(2,game_info.player_pos[i].x+6,game_info.player_pos[i].y+13,1,1,true,false)
+			pal()	
+	end
+end
+
+function draw_platform(player)
+
+			palt(0,false)
+			palt(1,true)
+			spr(2,game_info.player_pos[player.id].x+2,game_info.player_pos[player.id].y+13,1,1,false,false)
+			spr(2,game_info.player_pos[player.id].x+6,game_info.player_pos[player.id].y+13,1,1,true,false)
+			pal()	
+
+end
+
+function draw_background()
+
+	line(16,15,111,15,0)
+	line(16,111,111,111,0)
+	line(16,16,16,111,0)
+	line(111,16,111,111,0)
+	for _ , tree in pairs(trees) do
+		line(tree.cx + 7,16,tree.cx + 7,110,0)
+		line(tree.cx + 8,16,tree.cx + 8,110,0)
+	end
+end
+
+function draw_players()
+	for _,player in pairs(players) do
+		palt(0,false)
+		palt(1,true)
+		pal(7,players_colors[player.id])
+		if(player.jumping.active) then
+			pal(0,1)
+		end
+		spr(player.spr_n,player.x,player.y,2,2,false,false)
+		pal()
+	end
+end
+
+function draw_player(player)
+		palt(0,false)
+		palt(1,true)
+		pal(7,players_colors[player.id])
+		if(player.jumping.active) then
+			pal(0,1)
+		end
+		spr(player.spr_n,player.x,player.y,2,2,false,false)
+		pal()
+end
+
+function draw_points()
+	
+	for _,player in pairs(players) do
+		draw_pos_y = game_info.player_pos[player.id].y - 89
+		draw_pos_x = player.id == 1 and game_info.player_pos[player.id].x - 4 or game_info.player_pos[player.id].x + 16 + 4
+		draw_x = draw_pos_x - #tostr(player.points)*2
+		prt_out(player.points,draw_x,draw_pos_y,players_colors[player.id])	
+	end
+end	
+
+function draw_hitbox()
+
+	for _,player in pairs(players) do
+		local colr
+		if(player.hitbox.active) then
+			colr = 9
+		else
+			colr = 10
+		end 
+		for i = 0, player.hitbox.rh do
+			for j = 0,player.hitbox.rw do
+				pset(player.hitbox.rx + j,player.hitbox.ry + i,colr)
+			end
+		end
+	end
+end
+
+function draw_animations()
+
+	for n, anim in pairs(anims) do 	
+		for _,changes in pairs(anim.change_col) do
+		pal(changes.col,changes.to)
+		end
+		if(anim.playing and frame_counter%anim.fpp == 0) then
+			anim.frame+=1
+		end
+		spr(anim.sprites[anim.frame],anim.x,anim.y,anim.spr_w,anim.spr_h,anim.flip_x,anim.flip_y)
+		if(anim.frame == anim.length and not anim.loop) then
+			del(anims,anim)
+		elseif(anim.loop) then
+			anim.frame = 1
+		end
+		pal()
+	end
+	
+end
+
+
+function draw_timer()
+	
+	prt_out(game_info.timer,59,5,7)
+
+end
+
+function draw_trees()
+
+	for _ , tree in pairs(trees) do
+		for _, branch in pairs(tree.branches) do 
+			x = branch.pos == 0 and tree.cx - 8 or tree.cx + 8
+			line(x,tree.cy - 16 * branch.num,x + 16,tree.cy - 16 * branch.num,0)
+		end
+	end
+end
+
+function draw_tree(player)
+
+		for _, branch in pairs(trees[player.id].branches) do 
+			x = branch.pos == 0 and trees[player.id].cx - 8 or trees[player.id].cx + 8
+			line(x,trees[player.id].cy - 16 * branch.num,x + 16,trees[player.id].cy - 16 * branch.num,0)
+		end
+
+end
+
+function draw_game_elements()
+
+	clip(16,15,96,96)
+	camera(0,xoff)
+	draw_trees()
+	camera()
+
+end
+
+function draw_split()
+  for _, player in pairs(players) do
+	 	x_clip = player.id == 1 and 17 or 110
+	 	clip(16,15,96,96)
+	  --clip(x_clip,16,64,110,true)
+	 --	rectfill(x_clip,16,64,110,player.id)
+	 	camera(0,player.camera_info.yoff)
+	  draw_tree(player)
+			draw_player(player)
+			draw_platform(player)
+			camera()
+			clip()
+		end
+end
+
+
+ 	
+
+function prt_out(s,x,y,c)
+print(s,x-1,y,0)
+print(s,x+1,y)
+print(s,x,y-1)
+print(s,x,y+1)
+print(s,x,y,c)
+end
+
+-->8
+
+-->8
+anims = {}
+
+explosion_animation={
+
+playing = false,
+loop = false,
+frame = 1,
+length = 5,
+fpp=4,
+sprites={8,10,12,40,42},
+spr_w = 2,
+spr_h = 2
+}
+
+smash_animation={
+
+playing = false,
+loop = false,
+frame = 1,
+length =6,
+fpp=3,
+sprites={64,68,72,76,128,132,136,140},
+spr_w = 3,
+spr_h = 3
+
+}
+
+
+
+function play_animation(x,y,fpp,flip_x,flip_y,anim,chamge_col)
+
+	local new_anim = {
+		x = x,
+		y = y,
+		fpp = fpp,
+		flip_x = flip_x,
+		flip_y = flip_y,
+		playing = true,
+		loop = anim.loop,
+		frame = 1,
+		length = anim.length,
+		sprites = anim.sprites,
+		spr_w = anim.spr_w,
+		spr_h = anim.spr_h,
+		change_col = {}
+	}
+	add(new_anim.change_col, chamge_col) 
+	add(anims,new_anim)
+
+end
+-->8
+to_remove = {}
+
+function remove_trash()
+
+	for n,trash in pairs(to_remove) do
+		del(trash.table, trash.element)
+	end
+	to_remove = {}
+
+end
+
+
+__gfx__
+11111111111111111111111100000000000000000000000011111111111111110000000000000000000000000000000000000000000000000000000000000000
+11111111111111111000000000000000000000000000000011000011110000110000000000000000000000000000000005000555500055000000000000000000
+11111001100111111100000000000000000000000000000010011001100660010900090909000000000000999990000000002aaaa2a520000000000000000000
+11110000000011111111000000000000000000000000000010111101106666010000a97a7a900a00000099999999000002a2aa99aaaa50500000000000000000
+111100d77d0011111111111100000000000000000000000010111101106666010000aa9a779a0000000999aaaaa99000005aa999999aa0000000000000000000
+111110700701111111111111000000000000000000000000100110011006600100097a77aa7a900000099aaaa7a99000052a99aaaa99a2000000000000000000
+1111007007001111111111110000000000000000000000001100001111000011007a9aa777a7aa0000999a7777aa990005aa9aa77aa99a200000000000000000
+111107777770111111111111000000000000000000000000111111111111111100997a77777aa00000999777777a990005aa9a7a77aa9a200000000000000000
+1111077777701111000000000000000000000000000000000000000000000000009a9a7777a9a0000099a777777a990000a99a7777a995000000000000000000
+111100777700111100000000000000000000000000000000000000000000000000aa77aa7a7900000099aa777a7a990002aa9aaa7aa9aa200000000000000000
+1111100770011111000000000000000000000000000000000777777777777777000a7777a777a00000999aaa7aaa9000052a99aaaa99a5000000000000000000
+1111110770111111000000000000000000000000000000007777777777777777000a7a77777aaa000009999aaa9990000052a999999a25000000000000000000
+1111110000111111000000000000000000000000000000007772222222222222000aa977a79a00000000999999990000000a99aa99a250000000000000000000
+111111100111111100000000000000000000000000000000772222222222222200900aa7aa00900000000099990000000052a2aaa2a505000000000000000000
+11111111111111110000000000000000000000000000000077222222222222220000090000000000000000000000000005002020505000000000000000000000
+11111111111111110000000000000000000000000000000077222222222222220000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000077222222222222220000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000007722222222222222000500aa0a000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000007722222222222222000005555a550050000000050000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000777222222222222205a5aaaaaaaa5000000000000050500000000000000000000000000000000000
+0000000000000000000000000000000000000000000000007777777777777777005aaaaaaaaa5000000500005550500000000000000000000000000000000000
+00000000000000000000000000000000000000000000000007777777777777770555aa999aaa5500005550000550000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000000000000000000000aaaaa99aaaaa00005550000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000055a999999aa500000000000005000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000055aaa9999aa5a00005500500005500000000000000000000000000000000000
+000000000000000000000000000000000000000000000000000000000000000000aa9aaa9aaa55a0005505505505500000000000000000000000000000000000
+000000000000000000000000000000000000000000000000000000000000000005aaaaa9aaaaa500000005000500500000000000000000000000000000000000
+000000000000000000000000000000000000000000000000000000000000000000aaa9aaaaaa55a0000550000550000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000005a5aaaaaaa000000000505500000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000000000000000000000055a5a5aa50500000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000000a00550a500000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+10000011111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000
+00777001111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+07777701111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000
+07777701111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000
+07777701111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000
+07777701111111110000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000400000000000000000000
+00777001111111110000000000000000000000000000000000000000000000000000000000040000000000000000000000000004000400000000000000000400
+100000111111111100000000000000000000000000000000000000000000000000000000400440000000000000000000000000004004e4000000000040004000
+111111111111111100000000000000000000000000000000000000000000000000000000000040000000000000400000000000000000ee000000000400440000
+11111111111111110000000000000000000000000000000000000000000000000000000000004e400000000004000000000000000000ef400400000004400000
+11111111111111110000000000000000000000000000000000000000000000000000000000000fe00440004040000000000000000004ffe40044000440000000
+11111111111111110000000000000000000000000000000000000000000000000000000000004fe4000000440000000000000000004fe4040000004400000000
+1111111111111111000000000000000000000000000000000000000000000000000000000004e40000000400000000000000000000fe00000000044000000000
+111111111111111100000000000000000000000000000000000000000000000000000000000e400000004000000000000000000004f400004440040000000000
+1111111111111111000000000000000000000000000000000000000000000000000000000004000044000000000000000000000004e000000440044000000000
+111111111111111100000000000000000000000000000000000000000000000000000000004400000400400000000000000000000e4000000040044000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000e400000000400000000000000000000f4000000000040000000000
+111111111111111100000000000000000000000000000000000000000000000000000044effe000000004000000000000000044eff4000000000040000000000
+111111111111111100000000000000000000000000000000000000000000000000000000effe40000004000000000000000444effff000000000440000000000
+1111111111111111000000000000000000000000000000000000000000000000000000044400000000400040000000000000004ee44400000004400000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000000000400040000000000000440000000000044000440000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000004000440000000000000000000000000000004400044000000
+11111111111111110000000000000000000000000000000000000000000000000000000000400004000040000000000000000000000000000000400000400000
+11111111111111110000000000000000000000000000000000000000000000000000000004000044000040000000000000000000000000000000440000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000044000000000000000000000000400000400000044000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000040000000000000000000000004000000400000044000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000440000000000000000000000000000000000000004000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000004000000000000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000004000000000000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000
+11111111111111110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000400000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000040000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000044000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000044000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000004000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000400000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000400000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000400000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44400400000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+04000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000440000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000040000000000000000000000000000000440000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000555550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000500050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000500050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000055500050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000055555550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000055550050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000055550050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000055555550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000110000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111
+__label__
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddd0000dddddd0000dddddd0000dddddddddddddddddddddddd0000dddddd0000dddddd0000dddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddd008800dddd008800dddd008800dddddd00dd000d000ddddd00bb00dddd00bb00dddd00bb00ddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddd088880dddd088880dddd088880ddddddd0dddd0d0d0ddddd0bbbb0dddd0bbbb0dddd0bbbb0ddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddd088880dddd088880dddd088880ddddddd0dd000d0d0ddddd0bbbb0dddd0bbbb0dddd0bbbb0ddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddd008800dddd008800dddd008800ddddddd0dd0ddd0d0ddddd00bb00dddd00bb00dddd00bb00ddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddd0000dddddd0000dddddd0000ddddddd000d000d000dddddd0000dddddd0000dddddd0000dddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd000d000dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd0ddd0dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd00d000dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd0d0dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddd000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddd0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00ddddddddddddddddddd00ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddd0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddd00000000000000000dddddddddddddddddddddddddddddddddddddddddddddd000000000000000000dddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000d000d0dddd00d000ddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0ddd0d0d0ddd0ddd0ddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd00dd000d0ddd000d00dddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0ddd0d0d0ddddd0d0ddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0ddd0d0d000d00dd000ddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd0d0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddd000ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddd00000000000000000dddddddddddddddddddd0dddddddddd00000000000000000dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddd0ddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd000000000000000000ddddddddddddddd00000000000000000dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd000000000000000000ddddddddddddddd00000000000000000dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd000000000000000000dddddddddddddddddddddddddddddd000000000000000000dddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddd00dd00dddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddd00000000ddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddd00d88d00ddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddd080080dddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddd00800800ddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddd08888880ddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddd08888880ddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddd00888800ddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddd008800dddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddddd0880ddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddddddddd0000ddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddd00dddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0ddddddd00000000000000000dddddddddddddddddddddddddddddddddddddddddddddd000000000000000000dddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd0dddddddddddddddddddddd00dddddddddddddddddddddddddddddddddddddddddddddd00dddddddddddddddddddddd0dddddddddddddddd
+dddddddddddddddd000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000dddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+
+__sfx__
+000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0010800000000000000f050170701b0501d0501c0501f0501f0501e0501e0501b0501a0501d05021050280502c05031050310503105030050300502f0502f0502e0502d0502d0500000000000000000000000000
+__music__
+04 01424344
+
